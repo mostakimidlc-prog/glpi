@@ -16,6 +16,14 @@ RUN apt-get update && apt-get install -y \
     unzip \
     git \
     wget \
+    curl \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x (LTS)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g npm@latest \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer
@@ -71,14 +79,14 @@ WORKDIR /var/www/glpi
 # Copy GLPI source code
 COPY . /var/www/glpi/
 
-# Install Composer dependencies
+# Install Composer dependencies (PHP)
 RUN if [ -f "composer.json" ]; then \
         composer install --no-dev --optimize-autoloader --no-interaction; \
     fi
 
-# Install GLPI dependencies using bin/console
+# Install GLPI dependencies (both PHP and Node.js dependencies)
 RUN if [ -f "bin/console" ]; then \
-        php bin/console dependencies install --no-interaction || true; \
+        php bin/console dependencies install --no-interaction; \
     fi
 
 # Configure Apache DocumentRoot to point to /public directory
