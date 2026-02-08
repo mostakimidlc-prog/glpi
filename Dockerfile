@@ -101,6 +101,15 @@ RUN echo '<Directory /var/www/glpi/public>' >> /etc/apache2/apache2.conf \
     && echo '    Require all granted' >> /etc/apache2/apache2.conf \
     && echo '</Directory>' >> /etc/apache2/apache2.conf
 
+# Create .htaccess for proper routing in public directory
+RUN echo '<IfModule mod_rewrite.c>' > /var/www/glpi/public/.htaccess \
+    && echo '    RewriteEngine On' >> /var/www/glpi/public/.htaccess \
+    && echo '    RewriteCond %{REQUEST_FILENAME} !-f' >> /var/www/glpi/public/.htaccess \
+    && echo '    RewriteRule ^(.*)$ index.php [QSA,L]' >> /var/www/glpi/public/.htaccess \
+    && echo '</IfModule>' >> /var/www/glpi/public/.htaccess \
+    && echo '' >> /var/www/glpi/public/.htaccess \
+    && echo 'DirectoryIndex index.php' >> /var/www/glpi/public/.htaccess
+
 # Create required directories and set permissions
 RUN mkdir -p /var/www/glpi/config \
     /var/www/glpi/files \
