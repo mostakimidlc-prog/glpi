@@ -21,14 +21,12 @@ RUN apt-get update && apt-get install -y \
 # Configure and install mandatory PHP extensions
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
-    # Mandatory extensions
     bcmath \
     gd \
     intl \
     mysqli \
     pdo \
     pdo_mysql \
-    # Suggested extensions
     bz2 \
     exif \
     ldap \
@@ -38,10 +36,6 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
 # Install additional required extensions
 RUN pecl install apcu \
     && docker-php-ext-enable apcu
-
-# Enable required PHP modules (dom, fileinfo, filter, etc. are enabled by default)
-# Verify they are available
-RUN php -m | grep -E 'dom|fileinfo|filter|libxml|simplexml|xmlreader|xmlwriter|curl|openssl|zlib'
 
 # Configure PHP for GLPI
 RUN { \
@@ -68,18 +62,29 @@ RUN { \
 # Enable Apache modules
 RUN a2enmod rewrite headers ssl
 
-# Set working directory
-WORKDIR /var/www/html
+# Set working directory to GLPI root
+WORKDIR /var/www/glpi
 
 # Copy GLPI source code
-COPY . /var/www/html/
+COPY . /var/www/glpi/
+
+# Configure Apache DocumentRoot to point to /public directory
+RUN sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/sites-available/000-default.conf \
+    && sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/apache2.conf
+
+# Update Apache configuration for GLPI public directory
+RUN echo '<Directory /var/www/glpi/public>' >> /etc/apache2/apache2.conf \
+    && echo '    Options Indexes FollowSymLinks' >> /etc/apache2/apache2.conf \
+    && echo '    AllowOverride All' >> /etc/apache2/apache2.conf \
+    && echo '    Require all granted' >> /etc/apache2/apache2.conf \
+    && echo '</Directory>' >> /etc/apache2/apache2.conf
 
 # Create required directories and set permissions
-RUN mkdir -p /var/www/html/config \
-    /var/www/html/files \
-    /var/www/html/marketplace \
-    && chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html
+RUN mkdir -p /var/www/glpi/config \
+    /var/www/glpi/files \
+    /var/www/glpi/marketplace \
+    && chown -R www-data:www-data /var/www/glpi \
+    && chmod -R 755 /var/www/glpi
 
 # Expose port 80
 EXPOSE 80
