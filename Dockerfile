@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+
 # Configure and install mandatory PHP extensions
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
@@ -67,6 +70,16 @@ WORKDIR /var/www/glpi
 
 # Copy GLPI source code
 COPY . /var/www/glpi/
+
+# Install Composer dependencies
+RUN if [ -f "composer.json" ]; then \
+        composer install --no-dev --optimize-autoloader --no-interaction; \
+    fi
+
+# Install GLPI dependencies using bin/console
+RUN if [ -f "bin/console" ]; then \
+        php bin/console dependencies install --no-interaction || true; \
+    fi
 
 # Configure Apache DocumentRoot to point to /public directory
 RUN sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/sites-available/000-default.conf \
