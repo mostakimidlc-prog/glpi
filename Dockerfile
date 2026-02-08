@@ -86,7 +86,7 @@ RUN if [ -f "composer.json" ]; then \
 
 # Install GLPI dependencies (both PHP and Node.js dependencies)
 RUN if [ -f "bin/console" ]; then \
-        php bin/console dependencies install --no-interaction; \
+        php bin/console dependencies install --allow-superuser --no-interaction; \
     fi
 
 # Configure Apache DocumentRoot to point to /public directory
