@@ -12,7 +12,13 @@ pipeline {
                 script {
                     echo '🧹 Cleaning up old containers...'
                     sh '''
+                        # Stop and remove containers using docker-compose
                         docker-compose down || true
+                        
+                        # Remove old images to force rebuild
+                        docker rmi glpi-glpi-app || true
+                        
+                        # Remove dangling images
                         docker image prune -f || true
                     '''
                 }
@@ -28,34 +34,18 @@ pipeline {
             }
         }
         
-        stage('Verify Prerequisites') {
-            steps {
-                echo '🔍 Verifying GLPI prerequisites...'
-                sh '''
-                    echo "Checking Docker and Docker Compose versions..."
-                    docker --version
-                    docker-compose --version
-                    
-                    echo "Building verification image..."
-                    docker build -t glpi-verify -f Dockerfile .
-                    
-                    echo "Running prerequisite checks..."
-                    docker run --rm glpi-verify php -v
-                    docker run --rm glpi-verify php -m
-                '''
-            }
-        }
-        
         stage('Build and Start Services') {
             steps {
-                echo '🔨 Building and starting GLPI with MariaDB...'
+                echo '🔨 Building and starting GLPI with database...'
                 sh '''
+                    # Build and start all services
                     docker-compose up -d --build
                     
+                    # Wait for services to be healthy
                     echo "Waiting for database to be ready..."
                     sleep 20
                     
-                    echo "Waiting for GLPI application to start..."
+                    echo "Waiting for GLPI to be ready..."
                     sleep 10
                 '''
             }
@@ -63,22 +53,26 @@ pipeline {
         
         stage('Verify Deployment') {
             steps {
-                echo '✅ Verifying deployment...'
+                echo '✅ Verifying containers are running...'
                 sh '''
-                    echo "Checking container status..."
+                    # Show running containers
                     docker-compose ps
                     
-                    echo "\nChecking container health..."
+                    # Check container health
+                    echo "Checking container health..."
                     docker inspect --format='{{.State.Health.Status}}' glpi-container || echo "No health check"
                     docker inspect --format='{{.State.Health.Status}}' glpi-mysql || echo "No health check"
                     
-                    echo "\nVerifying GLPI PHP requirements..."
-                    docker exec glpi-container php /var/www/html/verify-requirements.php || echo "Verification script not found"
+                    # Verify .htaccess was created
+                    echo "Verifying .htaccess file..."
+                    docker exec glpi-container cat /var/www/glpi/public/.htaccess
                     
-                    echo "\nTesting GLPI accessibility..."
-                    curl -I http://localhost:${HOST_PORT} || echo "GLPI is starting..."
+                    # Check if GLPI is accessible
+                    echo "Testing GLPI accessibility..."
+                    curl -I http://localhost:${HOST_PORT} || echo "GLPI is starting up..."
                     
-                    echo "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                     echo "✨ GLPI Deployment Complete!"
                     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                     echo "🌐 Access GLPI at: http://localhost:${HOST_PORT}"
@@ -94,18 +88,18 @@ pipeline {
         success {
             echo '✨ Pipeline completed successfully!'
             echo ''
-            echo '📋 Installation Wizard Database Credentials:'
+            echo '📋 GLPI is ready for installation at:'
+            echo '   http://localhost:8088'
+            echo ''
+            echo '🔐 Database Credentials for Installation:'
             echo '   SQL Server: glpi-db'
             echo '   SQL User: glpi_user'
             echo '   SQL Password: glpi_pass_2024'
             echo '   Database: glpidb'
-            echo ''
-            echo '🔐 Default GLPI Login (after installation):'
-            echo '   Username: glpi'
-            echo '   Password: glpi'
         }
         failure {
-            echo '❌ Pipeline failed. Cleaning up...'
+            echo '❌ Pipeline failed. Check the logs above.'
+            echo 'Cleaning up failed deployment...'
             sh 'docker-compose down || true'
         }
         always {
