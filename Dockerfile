@@ -80,15 +80,14 @@ WORKDIR /var/www/glpi
 # Copy GLPI source code
 COPY . /var/www/glpi/
 
-# Install Composer dependencies (PHP)
+# Install Composer dependencies (PHP only - fast)
 RUN if [ -f "composer.json" ]; then \
         composer install --no-dev --optimize-autoloader --no-interaction; \
     fi
 
-# Install GLPI dependencies (both PHP and Node.js dependencies)
-RUN if [ -f "bin/console" ]; then \
-        php bin/console dependencies install --allow-superuser --no-interaction; \
-    fi
+# Skip npm dependencies during build - will install on container startup
+# This avoids timeout issues during Jenkins builds
+# Dependencies will be installed via docker-entrypoint.sh
 
 # Configure Apache DocumentRoot to point to /public directory
 RUN sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/sites-available/000-default.conf \
@@ -101,15 +100,6 @@ RUN echo '<Directory /var/www/glpi/public>' >> /etc/apache2/apache2.conf \
     && echo '    Require all granted' >> /etc/apache2/apache2.conf \
     && echo '</Directory>' >> /etc/apache2/apache2.conf
 
-# Create .htaccess for proper routing in public directory
-RUN echo '<IfModule mod_rewrite.c>' > /var/www/glpi/public/.htaccess \
-    && echo '    RewriteEngine On' >> /var/www/glpi/public/.htaccess \
-    && echo '    RewriteCond %{REQUEST_FILENAME} !-f' >> /var/www/glpi/public/.htaccess \
-    && echo '    RewriteRule ^(.*)$ index.php [QSA,L]' >> /var/www/glpi/public/.htaccess \
-    && echo '</IfModule>' >> /var/www/glpi/public/.htaccess \
-    && echo '' >> /var/www/glpi/public/.htaccess \
-    && echo 'DirectoryIndex index.php' >> /var/www/glpi/public/.htaccess
-
 # Create required directories and set permissions
 RUN mkdir -p /var/www/glpi/config \
     /var/www/glpi/files \
@@ -117,12 +107,16 @@ RUN mkdir -p /var/www/glpi/config \
     && chown -R www-data:www-data /var/www/glpi \
     && chmod -R 755 /var/www/glpi
 
+# Copy startup script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Expose port 80
 EXPOSE 80
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=5 \
     CMD curl -f http://localhost/ || exit 1
 
-# Start Apache
-CMD ["apache2-foreground"]
+# Use custom entrypoint that installs dependencies on startup
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

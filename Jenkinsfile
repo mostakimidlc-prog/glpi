@@ -41,12 +41,18 @@ pipeline {
                     # Build and start all services
                     docker-compose up -d --build
                     
-                    # Wait for services to be healthy
+                    # Wait for database to be ready
                     echo "Waiting for database to be ready..."
                     sleep 20
                     
-                    echo "Waiting for GLPI to be ready..."
-                    sleep 10
+                    # Wait for GLPI dependencies to install (happens on first startup)
+                    echo "Waiting for GLPI to install dependencies and start (this may take 2-3 minutes)..."
+                    echo "Dependencies are being installed in the background..."
+                    sleep 120
+                    
+                    # Check if dependencies installation is complete
+                    echo "Checking dependencies installation status..."
+                    docker exec glpi-container test -f /var/www/glpi/.dependencies_installed && echo "Dependencies installed!" || echo "Still installing..."
                 '''
             }
         }
