@@ -12,7 +12,17 @@ pipeline {
                 script {
                     echo '🧹 Cleaning up old containers...'
                     sh '''
+<<<<<<< HEAD
                         docker-compose down || true
+=======
+                        # Stop and remove containers using docker-compose
+                        docker-compose down || true
+                        
+                        # Remove old images to force rebuild
+                        docker rmi glpi-glpi-app || true
+                        
+                        # Remove dangling images
+>>>>>>> dev-testing
                         docker image prune -f || true
                     '''
                 }
@@ -28,6 +38,7 @@ pipeline {
             }
         }
         
+<<<<<<< HEAD
         stage('Verify Prerequisites') {
             steps {
                 echo '🔍 Verifying GLPI prerequisites...'
@@ -57,12 +68,50 @@ pipeline {
                     
                     echo "Waiting for GLPI application to start..."
                     sleep 10
+=======
+stage('Build and Start Services') {
+            steps {
+                echo '🔨 Building and starting GLPI with database...'
+                sh '''
+                    # Build and start all services
+                    docker-compose up -d --build
+                    
+                    # Wait for database to be ready
+                    echo "Waiting for database to be ready..."
+                    sleep 20
+                    
+                    # Wait for GLPI dependencies to install (happens on first startup)
+                    echo "Waiting for GLPI to install dependencies..."
+                    echo "This can take 5-10 minutes on first build. Please be patient..."
+                    
+                    # Check every 30 seconds for up to 10 minutes
+                    max_wait=3600  # 60 minutes
+                    elapsed=0
+                    interval=30
+                    
+                    while [ $elapsed -lt $max_wait ]; do
+                        if docker exec glpi-container test -f /var/www/glpi/.dependencies_installed 2>/dev/null; then
+                            echo "✅ Dependencies installed successfully!"
+                            break
+                        else
+                            echo "⏳ Still installing dependencies... ($elapsed seconds elapsed)"
+                            sleep $interval
+                            elapsed=$((elapsed + interval))
+                        fi
+                    done
+                    
+                    if [ $elapsed -ge $max_wait ]; then
+                        echo "⚠️  Timeout waiting for dependencies. Container may still be installing..."
+                        echo "Check logs with: docker-compose logs -f glpi-app"
+                    fi
+>>>>>>> dev-testing
                 '''
             }
         }
         
         stage('Verify Deployment') {
             steps {
+<<<<<<< HEAD
                 echo '✅ Verifying deployment...'
                 sh '''
                     echo "Checking container status..."
@@ -79,6 +128,28 @@ pipeline {
                     curl -I http://localhost:${HOST_PORT} || echo "GLPI is starting..."
                     
                     echo "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+=======
+                echo '✅ Verifying containers are running...'
+                sh '''
+                    # Show running containers
+                    docker-compose ps
+                    
+                    # Check container health
+                    echo "Checking container health..."
+                    docker inspect --format='{{.State.Health.Status}}' glpi-container || echo "No health check"
+                    docker inspect --format='{{.State.Health.Status}}' glpi-mysql || echo "No health check"
+                    
+                    # Verify .htaccess was created
+                    echo "Verifying .htaccess file..."
+                    docker exec glpi-container cat /var/www/glpi/public/.htaccess
+                    
+                    # Check if GLPI is accessible
+                    echo "Testing GLPI accessibility..."
+                    curl -I http://localhost:${HOST_PORT} || echo "GLPI is starting up..."
+                    
+                    echo ""
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+>>>>>>> dev-testing
                     echo "✨ GLPI Deployment Complete!"
                     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                     echo "🌐 Access GLPI at: http://localhost:${HOST_PORT}"
@@ -94,11 +165,19 @@ pipeline {
         success {
             echo '✨ Pipeline completed successfully!'
             echo ''
+<<<<<<< HEAD
             echo '📋 Installation Wizard Database Credentials:'
+=======
+            echo '📋 GLPI is ready for installation at:'
+            echo '   http://localhost:8088'
+            echo ''
+            echo '🔐 Database Credentials for Installation:'
+>>>>>>> dev-testing
             echo '   SQL Server: glpi-db'
             echo '   SQL User: glpi_user'
             echo '   SQL Password: glpi_pass_2024'
             echo '   Database: glpidb'
+<<<<<<< HEAD
             echo ''
             echo '🔐 Default GLPI Login (after installation):'
             echo '   Username: glpi'
@@ -106,6 +185,12 @@ pipeline {
         }
         failure {
             echo '❌ Pipeline failed. Cleaning up...'
+=======
+        }
+        failure {
+            echo '❌ Pipeline failed. Check the logs above.'
+            echo 'Cleaning up failed deployment...'
+>>>>>>> dev-testing
             sh 'docker-compose down || true'
         }
         always {

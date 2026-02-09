@@ -1,0 +1,177 @@
+pipeline {
+    agent any
+    
+    environment {
+        // DockerHub credentials
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKERHUB_USERNAME = 'mostakimidlc'
+        
+        // Image naming
+        IMAGE_NAME = 'glpi'
+        IMAGE_TAG = "${env.BUILD_NUMBER}" // e.g., glpi:1, glpi:2, etc.
+        LATEST_TAG = 'latest'
+        
+        // Full image names
+        FULL_IMAGE_NAME = "${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
+        
+        // Git branch
+        GIT_BRANCH = 'dev-testing'
+    }
+    
+    stages {
+        stage('🧹 Cleanup Workspace') {
+            steps {
+                echo '========== Cleaning workspace =========='
+                deleteDir()
+            }
+        }
+        
+        stage('📥 Checkout Code') {
+            steps {
+                echo '========== Checking out code from GitHub =========='
+                git branch: "${GIT_BRANCH}",
+                    credentialsId: 'github-creds',
+                    url: 'https://github.com/mostakimidlc-prog/glpi.git'
+                
+                echo "✅ Checked out branch: ${GIT_BRANCH}"
+            }
+        }
+        
+        stage('🔍 Verify Files') {
+            steps {
+                echo '========== Verifying required files =========='
+                sh '''
+                    echo "Checking for Dockerfile..."
+                    if [ ! -f Dockerfile ]; then
+                        echo "❌ ERROR: Dockerfile not found!"
+                        exit 1
+                    fi
+                    echo "✅ Dockerfile found"
+                    
+                    echo "Checking for docker-entrypoint.sh..."
+                    if [ ! -f docker-entrypoint.sh ]; then
+                        echo "❌ ERROR: docker-entrypoint.sh not found!"
+                        exit 1
+                    fi
+                    echo "✅ docker-entrypoint.sh found"
+                    
+                    ls -la
+                '''
+            }
+        }
+        
+        stage('🏗️ Build Docker Image') {
+            steps {
+                echo '========== Building Docker Image =========='
+                sh """
+                    echo "Building image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                    docker build -t ${FULL_IMAGE_NAME}:${IMAGE_TAG} .
+                    
+                    echo "Tagging as latest..."
+                    docker tag ${FULL_IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}:${LATEST_TAG}
+                    
+                    echo "✅ Image built successfully!"
+                    docker images | grep ${IMAGE_NAME}
+                """
+            }
+        }
+        
+        stage('🧪 Test Image') {
+            steps {
+                echo '========== Testing Docker Image =========='
+                sh """
+                    echo "Verifying image exists..."
+                    docker inspect ${FULL_IMAGE_NAME}:${IMAGE_TAG} > /dev/null 2>&1
+                    
+                    if [ \$? -eq 0 ]; then
+                        echo "✅ Image verification passed!"
+                    else
+                        echo "❌ Image verification failed!"
+                        exit 1
+                    fi
+                    
+                    echo "Image details:"
+                    docker inspect ${FULL_IMAGE_NAME}:${IMAGE_TAG} | grep -A 5 "Config"
+                """
+            }
+        }
+        
+        stage('🔐 DockerHub Login') {
+            steps {
+                echo '========== Logging into DockerHub =========='
+                sh '''
+                    echo "Logging in as: $DOCKERHUB_USERNAME"
+                    echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_USERNAME --password-stdin
+                    
+                    if [ $? -eq 0 ]; then
+                        echo "✅ DockerHub login successful!"
+                    else
+                        echo "❌ DockerHub login failed!"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+        
+        stage('📤 Push to DockerHub') {
+            steps {
+                echo '========== Pushing Images to DockerHub =========='
+                sh """
+                    echo "Pushing ${FULL_IMAGE_NAME}:${IMAGE_TAG}..."
+                    docker push ${FULL_IMAGE_NAME}:${IMAGE_TAG}
+                    
+                    echo "Pushing ${FULL_IMAGE_NAME}:${LATEST_TAG}..."
+                    docker push ${FULL_IMAGE_NAME}:${LATEST_TAG}
+                    
+                    echo "✅ Images pushed successfully!"
+                """
+            }
+        }
+        
+        stage('✅ Verify on DockerHub') {
+            steps {
+                echo '========== Verifying Upload =========='
+                sh """
+                    echo "Image available at:"
+                    echo "🔗 https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
+                    echo ""
+                    echo "Pull command:"
+                    echo "   docker pull ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "   docker pull ${FULL_IMAGE_NAME}:${LATEST_TAG}"
+                """
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo '========================================='
+            echo '🎉 PIPELINE COMPLETED SUCCESSFULLY! 🎉'
+            echo '========================================='
+            echo "✅ Image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+            echo "✅ Image: ${FULL_IMAGE_NAME}:${LATEST_TAG}"
+            echo "🔗 DockerHub: https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
+            echo '========================================='
+        }
+        
+        failure {
+            echo '========================================='
+            echo '❌ PIPELINE FAILED!'
+            echo '========================================='
+            echo 'Check the logs above for error details'
+        }
+        
+        always {
+            echo '========== Cleaning up =========='
+            sh '''
+                # Logout from DockerHub
+                docker logout || true
+                
+                # Optional: Remove local images to save space
+                # Uncomment if you want to clean up after each build
+                # docker rmi ${FULL_IMAGE_NAME}:${IMAGE_TAG} || true
+                # docker rmi ${FULL_IMAGE_NAME}:${LATEST_TAG} || true
+            '''
+        }
+    }
+}

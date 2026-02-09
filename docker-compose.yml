@@ -6,6 +6,12 @@ services:
     image: mariadb:10.11
     container_name: glpi-mysql
     command: --default-authentication-plugin=mysql_native_password
+<<<<<<< HEAD
+=======
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+>>>>>>> dev-testing
     environment:
       MYSQL_ROOT_PASSWORD: glpi_root_2024
       MYSQL_DATABASE: glpidb
@@ -30,14 +36,26 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: glpi-container
+<<<<<<< HEAD
+=======
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+>>>>>>> dev-testing
     ports:
       - "8088:80"
     environment:
       - TZ=Asia/Dhaka
     volumes:
+<<<<<<< HEAD
       - glpi-files:/var/www/html/files
       - glpi-config:/var/www/html/config
       - glpi-marketplace:/var/www/html/marketplace
+=======
+      - glpi-files:/var/www/glpi/files
+      - glpi-config:/var/www/glpi/config
+      - glpi-marketplace:/var/www/glpi/marketplace
+>>>>>>> dev-testing
     depends_on:
       glpi-db:
         condition: service_healthy
