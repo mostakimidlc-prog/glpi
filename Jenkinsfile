@@ -34,7 +34,7 @@ pipeline {
             }
         }
         
-        stage('Build and Start Services') {
+stage('Build and Start Services') {
             steps {
                 echo '🔨 Building and starting GLPI with database...'
                 sh '''
@@ -46,13 +46,29 @@ pipeline {
                     sleep 20
                     
                     # Wait for GLPI dependencies to install (happens on first startup)
-                    echo "Waiting for GLPI to install dependencies and start (this may take 2-3 minutes)..."
-                    echo "Dependencies are being installed in the background..."
-                    sleep 120
+                    echo "Waiting for GLPI to install dependencies..."
+                    echo "This can take 5-10 minutes on first build. Please be patient..."
                     
-                    # Check if dependencies installation is complete
-                    echo "Checking dependencies installation status..."
-                    docker exec glpi-container test -f /var/www/glpi/.dependencies_installed && echo "Dependencies installed!" || echo "Still installing..."
+                    # Check every 30 seconds for up to 10 minutes
+                    max_wait=3600  # 60 minutes
+                    elapsed=0
+                    interval=30
+                    
+                    while [ $elapsed -lt $max_wait ]; do
+                        if docker exec glpi-container test -f /var/www/glpi/.dependencies_installed 2>/dev/null; then
+                            echo "✅ Dependencies installed successfully!"
+                            break
+                        else
+                            echo "⏳ Still installing dependencies... ($elapsed seconds elapsed)"
+                            sleep $interval
+                            elapsed=$((elapsed + interval))
+                        fi
+                    done
+                    
+                    if [ $elapsed -ge $max_wait ]; then
+                        echo "⚠️  Timeout waiting for dependencies. Container may still be installing..."
+                        echo "Check logs with: docker-compose logs -f glpi-app"
+                    fi
                 '''
             }
         }
