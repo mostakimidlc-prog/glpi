@@ -8,31 +8,39 @@ pipeline {
         
         // Image naming
         IMAGE_NAME = 'glpi'
-        IMAGE_TAG = "${env.BUILD_NUMBER}" // e.g., glpi:1, glpi:2, etc.
+        IMAGE_TAG = "prod-${env.BUILD_NUMBER}"
         LATEST_TAG = 'latest'
-        
-        // Full image names
         FULL_IMAGE_NAME = "${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
         
-        // Git branch
-        GIT_BRANCH = 'dev-testing'
+        // Git configuration
+        GIT_BRANCH = 'production'
+        
+        // Production compose file
+        COMPOSE_FILE = 'docker-compose.prod.yml'
     }
     
     stages {
         stage('🧹 Cleanup Workspace') {
             steps {
-                echo '========== Cleaning workspace =========='
+                echo '========== Cleaning Jenkins workspace =========='
                 deleteDir()
+                echo '✅ Workspace cleaned (production containers untouched)'
             }
         }
         
-        stage('📥 Checkout Code') {
+        stage('📥 Checkout Production Branch') {
             steps {
-                echo '========== Checking out code from GitHub =========='
+                echo '========== Checking out PRODUCTION branch =========='
                 git branch: "${GIT_BRANCH}",
                     credentialsId: 'github-creds',
                     url: 'https://github.com/mostakimidlc-prog/glpi.git'
                 
+                sh '''
+                    echo "Current branch:"
+                    git branch --show-current
+                    echo "Latest commit:"
+                    git log -1 --oneline
+                '''
                 echo "✅ Checked out branch: ${GIT_BRANCH}"
             }
         }
@@ -48,6 +56,13 @@ pipeline {
                     fi
                     echo "✅ Dockerfile found"
                     
+                    echo "Checking for docker-compose.prod.yml..."
+                    if [ ! -f docker-compose.prod.yml ]; then
+                        echo "❌ ERROR: docker-compose.prod.yml not found!"
+                        exit 1
+                    fi
+                    echo "✅ docker-compose.prod.yml found"
+                    
                     echo "Checking for docker-entrypoint.sh..."
                     if [ ! -f docker-entrypoint.sh ]; then
                         echo "❌ ERROR: docker-entrypoint.sh not found!"
@@ -55,14 +70,16 @@ pipeline {
                     fi
                     echo "✅ docker-entrypoint.sh found"
                     
-                    ls -la
+                    echo ""
+                    echo "=== Project Files ==="
+                    ls -lah
                 '''
             }
         }
         
         stage('🏗️ Build Docker Image') {
             steps {
-                echo '========== Building Docker Image =========='
+                echo '========== Building Production Docker Image =========='
                 sh """
                     echo "Building image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
                     docker build -t ${FULL_IMAGE_NAME}:${IMAGE_TAG} .
@@ -71,32 +88,35 @@ pipeline {
                     docker tag ${FULL_IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}:${LATEST_TAG}
                     
                     echo "✅ Image built successfully!"
+                    echo ""
+                    echo "=== Built Images ==="
                     docker images | grep ${IMAGE_NAME}
                 """
             }
         }
         
-        stage('🧪 Test Image') {
+        stage('🧪 Test Image Integrity') {
             steps {
                 echo '========== Testing Docker Image =========='
                 sh """
-                    echo "Verifying image exists..."
+                    echo "Verifying image exists and is valid..."
                     docker inspect ${FULL_IMAGE_NAME}:${IMAGE_TAG} > /dev/null 2>&1
                     
                     if [ \$? -eq 0 ]; then
                         echo "✅ Image verification passed!"
+                        echo ""
+                        echo "=== Image Details ==="
+                        docker inspect ${FULL_IMAGE_NAME}:${IMAGE_TAG} --format='{{.Config.Image}}'
+                        docker inspect ${FULL_IMAGE_NAME}:${IMAGE_TAG} --format='Size: {{.Size}} bytes'
                     else
                         echo "❌ Image verification failed!"
                         exit 1
                     fi
-                    
-                    echo "Image details:"
-                    docker inspect ${FULL_IMAGE_NAME}:${IMAGE_TAG} | grep -A 5 "Config"
                 """
             }
         }
         
-        stage('🔐 DockerHub Login') {
+        stage('🔐 Login to DockerHub') {
             steps {
                 echo '========== Logging into DockerHub =========='
                 sh '''
@@ -123,21 +143,124 @@ pipeline {
                     echo "Pushing ${FULL_IMAGE_NAME}:${LATEST_TAG}..."
                     docker push ${FULL_IMAGE_NAME}:${LATEST_TAG}
                     
-                    echo "✅ Images pushed successfully!"
+                    echo "✅ All images pushed successfully!"
+                    echo ""
+                    echo "=== DockerHub Tags ==="
+                    echo "  • ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "  • ${FULL_IMAGE_NAME}:${LATEST_TAG}"
                 """
             }
         }
         
-        stage('✅ Verify on DockerHub') {
+        stage('🛑 Stop Old Production (if running)') {
             steps {
-                echo '========== Verifying Upload =========='
+                echo '========== Stopping old production containers =========='
                 sh """
-                    echo "Image available at:"
-                    echo "🔗 https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
+                    if [ -f ${COMPOSE_FILE} ]; then
+                        echo "Stopping existing production containers..."
+                        docker-compose -f ${COMPOSE_FILE} down || true
+                        echo "✅ Old production containers stopped"
+                    else
+                        echo "⚠️ No existing production deployment found"
+                    fi
+                """
+            }
+        }
+        
+        stage('🚀 Deploy Production') {
+            steps {
+                echo '========== Deploying Production Environment =========='
+                sh """
+                    export IMAGE_TAG=${IMAGE_TAG}
+                    
+                    echo "Starting production containers with image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                    docker-compose -f ${COMPOSE_FILE} up -d --build
+                    
                     echo ""
-                    echo "Pull command:"
-                    echo "   docker pull ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "Waiting for containers to be healthy..."
+                    sleep 10
+                    
+                    echo ""
+                    echo "=== Production Container Status ==="
+                    docker-compose -f ${COMPOSE_FILE} ps
+                    
+                    echo ""
+                    echo "✅ Production deployment complete!"
+                """
+            }
+        }
+        
+        stage('✅ Verify Production Deployment') {
+            steps {
+                echo '========== Verifying Production Deployment =========='
+                sh """
+                    echo "Checking production containers..."
+                    
+                    # Check if containers are running
+                    if docker ps | grep -q "glpi-prod-app"; then
+                        echo "✅ glpi-prod-app is running"
+                    else
+                        echo "❌ glpi-prod-app is NOT running"
+                        exit 1
+                    fi
+                    
+                    if docker ps | grep -q "glpi-prod-db"; then
+                        echo "✅ glpi-prod-db is running"
+                    else
+                        echo "❌ glpi-prod-db is NOT running"
+                        exit 1
+                    fi
+                    
+                    echo ""
+                    echo "Checking GLPI accessibility..."
+                    sleep 5
+                    
+                    # Test HTTP response
+                    if curl -f -s http://localhost:8090 > /dev/null; then
+                        echo "✅ GLPI is accessible at http://localhost:8090"
+                    else
+                        echo "⚠️ GLPI may still be starting up..."
+                        echo "Check logs: docker logs glpi-prod-app"
+                    fi
+                    
+                    echo ""
+                    echo "=== Production Environment Info ==="
+                    echo "  🌐 GLPI URL: http://localhost:8090"
+                    echo "  🐳 App Container: glpi-prod-app"
+                    echo "  🗄️ DB Container: glpi-prod-db"
+                    echo "  📦 Network: glpi-prod-network"
+                """
+            }
+        }
+        
+        stage('📊 Summary') {
+            steps {
+                echo '========== Deployment Summary =========='
+                sh """
+                    echo ""
+                    echo "╔════════════════════════════════════════════════════════╗"
+                    echo "║       PRODUCTION DEPLOYMENT SUCCESSFUL! 🎉             ║"
+                    echo "╚════════════════════════════════════════════════════════╝"
+                    echo ""
+                    echo "📦 DockerHub Repository:"
+                    echo "   🔗 https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
+                    echo ""
+                    echo "🏷️ Image Tags:"
+                    echo "   • ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+                    echo "   • ${FULL_IMAGE_NAME}:${LATEST_TAG}"
+                    echo ""
+                    echo "🌐 Production Access:"
+                    echo "   • GLPI: http://localhost:8090"
+                    echo "   • Branch: ${GIT_BRANCH}"
+                    echo ""
+                    echo "🐳 Pull Command:"
                     echo "   docker pull ${FULL_IMAGE_NAME}:${LATEST_TAG}"
+                    echo ""
+                    echo "🔧 Management Commands:"
+                    echo "   • Logs: docker logs -f glpi-prod-app"
+                    echo "   • Status: docker-compose -f ${COMPOSE_FILE} ps"
+                    echo "   • Restart: docker-compose -f ${COMPOSE_FILE} restart"
+                    echo ""
                 """
             }
         }
@@ -146,31 +269,36 @@ pipeline {
     post {
         success {
             echo '========================================='
-            echo '🎉 PIPELINE COMPLETED SUCCESSFULLY! 🎉'
+            echo '✅ PRODUCTION PIPELINE COMPLETED!'
             echo '========================================='
-            echo "✅ Image: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
-            echo "✅ Image: ${FULL_IMAGE_NAME}:${LATEST_TAG}"
-            echo "🔗 DockerHub: https://hub.docker.com/r/${DOCKERHUB_USERNAME}/${IMAGE_NAME}"
-            echo '========================================='
+            echo "Image pushed: ${FULL_IMAGE_NAME}:${IMAGE_TAG}"
+            echo "Production running on: http://localhost:8090"
+            echo "Development still safe on: http://localhost:8088"
         }
         
         failure {
             echo '========================================='
-            echo '❌ PIPELINE FAILED!'
+            echo '❌ PRODUCTION PIPELINE FAILED!'
             echo '========================================='
             echo 'Check the logs above for error details'
+            echo 'Production deployment may have been rolled back'
         }
         
         always {
-            echo '========== Cleaning up =========='
+            echo '========== Cleanup =========='
             sh '''
                 # Logout from DockerHub
                 docker logout || true
                 
-                # Optional: Remove local images to save space
-                # Uncomment if you want to clean up after each build
-                # docker rmi ${FULL_IMAGE_NAME}:${IMAGE_TAG} || true
-                # docker rmi ${FULL_IMAGE_NAME}:${LATEST_TAG} || true
+                # Show final container status
+                echo ""
+                echo "=== All GLPI Containers ==="
+                docker ps --filter "name=glpi" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}"
+                
+                echo ""
+                echo "=== Environment Summary ==="
+                echo "Development (8088): $(docker ps -q -f name=glpi-dev-app > /dev/null 2>&1 && echo '✅ Running' || echo '⚠️ Stopped')"
+                echo "Production (8090):  $(docker ps -q -f name=glpi-prod-app > /dev/null 2>&1 && echo '✅ Running' || echo '⚠️ Stopped')"
             '''
         }
     }
