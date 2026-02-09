@@ -9,45 +9,59 @@ echo "=========================================="
 if [ ! -f "/var/www/glpi/.dependencies_installed" ]; then
     echo ""
     echo "📦 Installing GLPI dependencies..."
-    echo "This process can take 5-10 minutes."
+    echo "This process can take 5-15 minutes."
     echo "Please be patient..."
     echo ""
     
     cd /var/www/glpi
     
-    # Install dependencies with retries and progress logging
-    max_attempts=3
-    attempt=1
+    # Configure npm for better reliability
+    echo "⚙️  Configuring npm..."
+    npm config set fetch-timeout 300000
+    npm config set fetch-retries 5
+    npm config set fetch-retry-mintimeout 20000
+    npm config set fetch-retry-maxtimeout 120000
     
-    while [ $attempt -le $max_attempts ]; do
+    # Install dependencies with retries
+    max_attempts=5
+    attempt=1
+    success=0
+    
+    while [ $attempt -le $max_attempts ] && [ $success -eq 0 ]; do
+        echo ""
         echo "🔄 Attempt $attempt of $max_attempts..."
         echo "$(date): Starting dependency installation..."
         
-        if php bin/console dependencies install --allow-superuser --no-interaction 2>&1 | tee /tmp/dependencies.log; then
+        if php bin/console dependencies install --allow-superuser --no-interaction; then
             echo ""
             echo "✅ $(date): Dependencies installed successfully!"
+            success=1
             touch /var/www/glpi/.dependencies_installed
-            break
         else
+            exit_code=$?
             echo ""
-            echo "❌ $(date): Dependency installation failed."
-            echo "Last 20 lines of output:"
-            tail -20 /tmp/dependencies.log
+            echo "❌ $(date): Dependency installation failed with exit code $exit_code"
             
             if [ $attempt -lt $max_attempts ]; then
-                echo "Retrying in 10 seconds..."
-                sleep 10
+                wait_time=$((attempt * 15))
+                echo "Waiting $wait_time seconds before retry..."
+                sleep $wait_time
             fi
             attempt=$((attempt + 1))
         fi
     done
     
-    if [ ! -f "/var/www/glpi/.dependencies_installed" ]; then
+    if [ $success -eq 0 ]; then
         echo ""
-        echo "⚠️  Warning: Dependencies installation failed after $max_attempts attempts."
-        echo "GLPI may not work correctly. Please check logs."
-        echo "You can try manually running:"
-        echo "  docker exec glpi-container php /var/www/glpi/bin/console dependencies install --allow-superuser"
+        echo "⚠️  ERROR: Dependencies installation failed after $max_attempts attempts."
+        echo "This is likely due to network timeouts downloading npm packages."
+        echo ""
+        echo "You can try to fix this by:"
+        echo "1. docker exec -it glpi-container bash"
+        echo "2. cd /var/www/glpi"
+        echo "3. php bin/console dependencies install --allow-superuser"
+        echo ""
+        echo "Container will start Apache anyway, but GLPI may not work correctly."
         echo ""
     fi
 else
