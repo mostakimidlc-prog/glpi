@@ -1,0 +1,208 @@
+pipeline {
+    agent any
+    
+    environment {
+        // Docker image to deploy
+        DOCKER_IMAGE = 'mostakimidlc/glpi:latest'
+        
+        // Kubernetes namespace
+        K8S_NAMESPACE = 'glpi-production'
+        
+        // Manifest directory
+        K8S_MANIFESTS = 'k8s-deployment/prod'
+    }
+    
+    stages {
+        stage('🔍 Pre-flight Checks') {
+            steps {
+                echo '========================================='
+                echo 'Kubernetes Deployment - Pre-flight Check'
+                echo '========================================='
+                sh '''
+                    echo "✓ Checking kubectl access..."
+                    kubectl version --client
+                    
+                    echo ""
+                    echo "✓ Checking cluster connection..."
+                    kubectl cluster-info
+                    
+                    echo ""
+                    echo "✓ Current context:"
+                    kubectl config current-context
+                    
+                    echo ""
+                    echo "✓ Available nodes:"
+                    kubectl get nodes
+                '''
+            }
+        }
+        
+        stage('🗂️ Prepare Namespace') {
+            steps {
+                echo '========== Creating Namespace =========='
+                sh """
+                    kubectl apply -f ${K8S_MANIFESTS}/namespace.yaml
+                    
+                    echo ""
+                    echo "✅ Namespace ready!"
+                    kubectl get namespace ${K8S_NAMESPACE}
+                """
+            }
+        }
+        
+        stage('💾 Deploy Database Storage') {
+            steps {
+                echo '========== Setting up Persistent Storage =========='
+                sh """
+                    # Create directory for PV on host
+                    sudo mkdir -p /mnt/data/mysql-glpi-production
+                    sudo chmod 777 /mnt/data/mysql-glpi-production
+                    
+                    # Apply PV and PVC
+                    kubectl apply -f ${K8S_MANIFESTS}/mysql-pv.yaml
+                    
+                    echo ""
+                    echo "✅ Storage configured!"
+                    kubectl get pv,pvc -n ${K8S_NAMESPACE}
+                """
+            }
+        }
+        
+        stage('🗄️ Deploy Database') {
+            steps {
+                echo '========== Deploying MySQL Database =========='
+                sh """
+                    kubectl apply -f ${K8S_MANIFESTS}/mysql-deployment.yaml
+                    
+                    echo ""
+                    echo "⏳ Waiting for database to be ready..."
+                    kubectl wait --for=condition=available --timeout=300s \
+                        deployment/mysql -n ${K8S_NAMESPACE} || true
+                    
+                    echo ""
+                    echo "✅ Database status:"
+                    kubectl get pods,svc -n ${K8S_NAMESPACE} -l app=mysql
+                """
+            }
+        }
+        
+        stage('🚀 Deploy GLPI Application') {
+            steps {
+                echo '========== Deploying GLPI (3 replicas) =========='
+                sh """
+                    # Pull latest image first
+                    echo "📥 Pulling latest image: ${DOCKER_IMAGE}"
+                    docker pull ${DOCKER_IMAGE}
+                    
+                    # Deploy application
+                    kubectl apply -f ${K8S_MANIFESTS}/glpi-deployment.yaml
+                    
+                    echo ""
+                    echo "⏳ Waiting for GLPI pods to be ready..."
+                    kubectl wait --for=condition=available --timeout=600s \
+                        deployment/glpi -n ${K8S_NAMESPACE} || true
+                    
+                    echo ""
+                    echo "✅ GLPI deployment status:"
+                    kubectl get deployment glpi -n ${K8S_NAMESPACE}
+                """
+            }
+        }
+        
+        stage('🔍 Verify Deployment') {
+            steps {
+                echo '========== Verifying Complete Deployment =========='
+                sh """
+                    echo "📊 All Resources in ${K8S_NAMESPACE}:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    kubectl get all -n ${K8S_NAMESPACE}
+                    
+                    echo ""
+                    echo "📦 Pods Details:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    kubectl get pods -n ${K8S_NAMESPACE} -o wide
+                    
+                    echo ""
+                    echo "🌐 Services:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    kubectl get svc -n ${K8S_NAMESPACE}
+                    
+                    echo ""
+                    echo "💾 Persistent Volumes:"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    kubectl get pv,pvc -n ${K8S_NAMESPACE}
+                """
+            }
+        }
+        
+        stage('🌍 Get Access URL') {
+            steps {
+                script {
+                    echo ''
+                    echo '╔════════════════════════════════════════════════╗'
+                    echo '║     GLPI DEPLOYED TO KUBERNETES! 🎉            ║'
+                    echo '╚════════════════════════════════════════════════╝'
+                    
+                    sh '''
+                        echo ""
+                        echo "📍 Access Information:"
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        
+                        # Get NodePort
+                        NODE_PORT=$(kubectl get svc glpi -n glpi-production -o jsonpath='{.spec.ports[0].nodePort}')
+                        
+                        # Get Node IP (for Minikube)
+                        if command -v minikube &> /dev/null; then
+                            NODE_IP=$(minikube ip)
+                            echo "🔗 Minikube URL: http://${NODE_IP}:${NODE_PORT}"
+                            echo ""
+                            echo "   Alternative: Run 'minikube service glpi -n glpi-production'"
+                        else
+                            NODE_IP=$(hostname -I | awk '{print $1}')
+                            echo "🔗 Access URL: http://${NODE_IP}:${NODE_PORT}"
+                        fi
+                        
+                        echo ""
+                        echo "📊 Deployment Summary:"
+                        echo "   • Namespace: glpi-production"
+                        echo "   • Replicas: 3"
+                        echo "   • NodePort: ${NODE_PORT}"
+                        echo "   • Database: Persistent (survives restarts)"
+                        echo ""
+                        echo "🎯 Quick Commands:"
+                        echo "   View pods:  kubectl get pods -n glpi-production"
+                        echo "   View logs:  kubectl logs -f deployment/glpi -n glpi-production"
+                        echo "   Scale up:   kubectl scale deployment/glpi --replicas=5 -n glpi-production"
+                        echo ""
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo '✅ Kubernetes deployment completed successfully!'
+            sh '''
+                echo ""
+                echo "🔔 Deployment Success!"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                kubectl get pods -n glpi-production
+            '''
+        }
+        
+        failure {
+            echo '❌ Deployment failed! Check logs above.'
+            sh '''
+                echo ""
+                echo "🔍 Debugging Information:"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                kubectl get events -n glpi-production --sort-by='.lastTimestamp' | tail -20
+            '''
+        }
+        
+        always {
+            echo '🏁 Pipeline execution completed.'
+        }
+    }
+}

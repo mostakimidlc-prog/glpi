@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: glpi-config
+  namespace: glpi-production
+data:
+  timezone: "UTC"
+  max_upload_size: "100M"
