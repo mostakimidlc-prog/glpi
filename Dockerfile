@@ -71,13 +71,14 @@ RUN { \
     echo 'opcache.fast_shutdown=1'; \
     } > /usr/local/etc/php/conf.d/opcache.ini
 
+# REMOVE THIS SECTION - Redis is already enabled above
 # Configure Redis extension
-RUN { \
-    echo 'extension=redis.so'; \
-    echo 'redis.session.locking_enabled=1'; \
-    echo 'redis.session.lock_retries=-1'; \
-    echo 'redis.session.lock_wait_time=10000'; \
-    } > /usr/local/etc/php/conf.d/redis.ini
+# RUN { \
+#     echo 'extension=redis.so'; \
+#     echo 'redis.session.locking_enabled=1'; \
+#     echo 'redis.session.lock_retries=-1'; \
+#     echo 'redis.session.lock_wait_time=10000'; \
+# } > /usr/local/etc/php/conf.d/redis.ini
 
 # Enable Apache modules
 RUN a2enmod rewrite headers ssl
@@ -118,9 +119,9 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Expose port 80
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=5 \
-    CMD curl -f http://localhost/ || exit 1
+# Health check - check if Apache is responding
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
+    CMD curl -f http://localhost/status.php || curl -f http://localhost/ || exit 1
 
 # Use custom entrypoint that installs dependencies on startup
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
