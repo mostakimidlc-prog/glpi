@@ -6,12 +6,9 @@ services:
     image: mariadb:10.11
     container_name: glpi-mysql
     command: --default-authentication-plugin=mysql_native_password
-<<<<<<< HEAD
-=======
     dns:
       - 8.8.8.8
       - 8.8.4.4
->>>>>>> dev-testing
     environment:
       MYSQL_ROOT_PASSWORD: glpi_root_2024
       MYSQL_DATABASE: glpidb
@@ -30,34 +27,52 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis Cache
+  glpi-redis:
+    image: redis:7-alpine
+    container_name: glpi-redis
+    hostname: glpi-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - glpi-redis-data:/data
+    networks:
+      - glpi-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # GLPI Application (PHP 8.2)
   glpi-app:
     build: 
       context: .
       dockerfile: Dockerfile
     container_name: glpi-container
-<<<<<<< HEAD
-=======
     dns:
       - 8.8.8.8
       - 8.8.4.4
->>>>>>> dev-testing
     ports:
       - "8088:80"
     environment:
       - TZ=Asia/Dhaka
+      - REDIS_HOST=glpi-redis
+      - REDIS_PORT=6379
     volumes:
-<<<<<<< HEAD
-      - glpi-files:/var/www/html/files
-      - glpi-config:/var/www/html/config
-      - glpi-marketplace:/var/www/html/marketplace
-=======
       - glpi-files:/var/www/glpi/files
       - glpi-config:/var/www/glpi/config
       - glpi-marketplace:/var/www/glpi/marketplace
->>>>>>> dev-testing
     depends_on:
       glpi-db:
+        condition: service_healthy
+      glpi-redis:
         condition: service_healthy
     networks:
       - glpi-network
@@ -75,6 +90,8 @@ networks:
 
 volumes:
   glpi-db-data:
+    driver: local
+  glpi-redis-data:
     driver: local
   glpi-files:
     driver: local

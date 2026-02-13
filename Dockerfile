@@ -45,9 +45,9 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     opcache \
     zip
 
-# Install additional required extensions
-RUN pecl install apcu \
-    && docker-php-ext-enable apcu
+# Install Redis and APCu extensions
+RUN pecl install apcu redis \
+    && docker-php-ext-enable apcu redis
 
 # Configure PHP for GLPI
 RUN { \
@@ -71,6 +71,14 @@ RUN { \
     echo 'opcache.fast_shutdown=1'; \
     } > /usr/local/etc/php/conf.d/opcache.ini
 
+# Configure Redis extension
+RUN { \
+    echo 'extension=redis.so'; \
+    echo 'redis.session.locking_enabled=1'; \
+    echo 'redis.session.lock_retries=-1'; \
+    echo 'redis.session.lock_wait_time=10000'; \
+    } > /usr/local/etc/php/conf.d/redis.ini
+
 # Enable Apache modules
 RUN a2enmod rewrite headers ssl
 
@@ -84,10 +92,6 @@ COPY . /var/www/glpi/
 RUN if [ -f "composer.json" ]; then \
         composer install --no-dev --optimize-autoloader --no-interaction; \
     fi
-
-# Skip npm dependencies during build - will install on container startup
-# This avoids timeout issues during Jenkins builds
-# Dependencies will be installed via docker-entrypoint.sh
 
 # Configure Apache DocumentRoot to point to /public directory
 RUN sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/sites-available/000-default.conf \
