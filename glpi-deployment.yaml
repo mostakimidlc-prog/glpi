@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-deployment
+  labels:
+    app: glpi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: glpi
+  template:
+    metadata:
+      labels:
+        app: glpi
+    spec:
+      containers:
+      - name: glpi
+        # Pointing to your local registry image
+        image: localhost:5000/glpi:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: glpi-service
+spec:
+  type: NodePort
+  selector:
+    app: glpi
+  ports:
+    - port: 80
+      targetPort: 80
+      # This is the port you requested
+      nodePort: 30096

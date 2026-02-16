@@ -1,0 +1,36 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-db
+spec:
+  selector:
+    matchLabels:
+      app: glpi-db
+  template:
+    metadata:
+      labels:
+        app: glpi-db
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.6
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          value: "root_pass"
+        - name: MARIADB_DATABASE
+          value: "glpidb"
+        - name: MARIADB_USER
+          value: "glpi_user"
+        - name: MARIADB_PASSWORD
+          value: "glpi_pass"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: glpi-db-service
+spec:
+  selector:
+    app: glpi-db
+  ports:
+    - port: 3306

@@ -1,6 +1,18 @@
 # GLPI Dockerfile - Meeting Official Prerequisites
 FROM php:8.2-apache
 
+# --- PROXY CONFIGURATION START ---
+# Declare build arguments passed from Jenkins
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
+# Set environment variables for the build process (apt, curl, etc.)
+ENV http_proxy=$http_proxy
+ENV https_proxy=$https_proxy
+ENV no_proxy=$no_proxy
+# --- PROXY CONFIGURATION END ---
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     libpng-dev \
@@ -46,7 +58,9 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     zip
 
 # Install Redis and APCu extensions
-RUN pecl install apcu redis \
+# Using -d avoids the 'config-set' channel validation error
+RUN pear config-set http_proxy "$http_proxy" \
+    && pecl install apcu redis \
     && docker-php-ext-enable apcu redis
 
 # Configure PHP for GLPI
@@ -71,15 +85,6 @@ RUN { \
     echo 'opcache.fast_shutdown=1'; \
     } > /usr/local/etc/php/conf.d/opcache.ini
 
-# REMOVE THIS SECTION - Redis is already enabled above
-# Configure Redis extension
-# RUN { \
-#     echo 'extension=redis.so'; \
-#     echo 'redis.session.locking_enabled=1'; \
-#     echo 'redis.session.lock_retries=-1'; \
-#     echo 'redis.session.lock_wait_time=10000'; \
-# } > /usr/local/etc/php/conf.d/redis.ini
-
 # Enable Apache modules
 RUN a2enmod rewrite headers ssl
 
@@ -89,16 +94,17 @@ WORKDIR /var/www/glpi
 # Copy GLPI source code
 COPY . /var/www/glpi/
 
-# Install Composer dependencies (PHP only - fast)
+# Install Composer dependencies
+# Composer respects the http_proxy env variable automatically
 RUN if [ -f "composer.json" ]; then \
         composer install --no-dev --optimize-autoloader --no-interaction; \
     fi
 
-# Configure Apache DocumentRoot to point to /public directory
+# Configure Apache DocumentRoot
 RUN sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/sites-available/000-default.conf \
     && sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/apache2.conf
 
-# Update Apache configuration for GLPI public directory
+# Update Apache configuration
 RUN echo '<Directory /var/www/glpi/public>' >> /etc/apache2/apache2.conf \
     && echo '    Options Indexes FollowSymLinks' >> /etc/apache2/apache2.conf \
     && echo '    AllowOverride All' >> /etc/apache2/apache2.conf \
@@ -119,9 +125,8 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Expose port 80
 EXPOSE 80
 
-# Health check - check if Apache is responding
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
     CMD curl -f http://localhost/status.php || curl -f http://localhost/ || exit 1
 
-# Use custom entrypoint that installs dependencies on startup
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
