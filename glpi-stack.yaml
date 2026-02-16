@@ -139,6 +139,18 @@ spec:
       - name: glpi
         image: localhost:5000/glpi:latest
         imagePullPolicy: Always
+        env:
+        # REPLACE THE PROXY URL BELOW WITH YOUR ACTUAL CORPORATE PROXY
+        - name: http_proxy
+          value: "http://192.168.111.21:8080"
+        - name: https_proxy
+          value: "http://192.168.111.21:8080"
+        # THIS PREVENTS INTERNAL TRAFFIC FROM GOING THROUGH THE PROXY
+        - name: no_proxy
+          value: "localhost,127.0.0.1,glpi-db-service,glpi-redis-service,10.42.0.0/16"
+        # FIX FOR THE DUBIOUS OWNERSHIP ERROR
+        - name: GIT_SAFE_DIR
+          value: "true"
         ports:
         - containerPort: 80
         volumeMounts:
