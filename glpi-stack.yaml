@@ -1,6 +1,6 @@
 # glpi-stack.yaml
 ---
-# STORAGE DEFINITIONS
+# STORAGE DEFINITIONS (Keep these exactly as they are)
 ---
 apiVersion: v1
 kind: PersistentVolume
@@ -9,8 +9,7 @@ metadata:
 spec:
   capacity:
     storage: 5Gi
-  accessModes:
-    - ReadWriteOnce
+  accessModes: ["ReadWriteOnce"]
   hostPath:
     path: "/home/mostakim/projects/glpi/mysql-data"
 ---
@@ -19,8 +18,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: glpi-db-pvc
 spec:
-  accessModes:
-    - ReadWriteOnce
+  accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       storage: 5Gi
@@ -32,8 +30,7 @@ metadata:
 spec:
   capacity:
     storage: 2Gi
-  accessModes:
-    - ReadWriteOnce
+  accessModes: ["ReadWriteOnce"]
   hostPath:
     path: "/home/mostakim/projects/glpi/glpi-files"
 ---
@@ -42,13 +39,34 @@ kind: PersistentVolumeClaim
 metadata:
   name: glpi-files-pvc
 spec:
-  accessModes:
-    - ReadWriteOnce
+  accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       storage: 2Gi
 ---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: glpi-config-pv
+spec:
+  capacity:
+    storage: 500Mi
+  accessModes: ["ReadWriteOnce"]
+  hostPath:
+    path: "/home/mostakim/projects/glpi/glpi-config"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: glpi-config-pvc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 500Mi
+---
 # 1. MariaDB Database
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -93,6 +111,7 @@ spec:
     - port: 3306
 ---
 # 2. Redis Cache
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -121,6 +140,7 @@ spec:
     - port: 6379
 ---
 # 3. GLPI Web App
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -140,26 +160,26 @@ spec:
         image: localhost:5000/glpi:latest
         imagePullPolicy: Always
         env:
-        # REPLACE THE PROXY URL BELOW WITH YOUR ACTUAL CORPORATE PROXY
         - name: http_proxy
           value: "http://192.168.111.21:8080"
         - name: https_proxy
           value: "http://192.168.111.21:8080"
-        # THIS PREVENTS INTERNAL TRAFFIC FROM GOING THROUGH THE PROXY
         - name: no_proxy
           value: "localhost,127.0.0.1,glpi-db-service,glpi-redis-service,10.42.0.0/16"
-        # FIX FOR THE DUBIOUS OWNERSHIP ERROR
-        - name: GIT_SAFE_DIR
-          value: "true"
         ports:
         - containerPort: 80
         volumeMounts:
         - name: glpi-storage
-          mountPath: /var/www/html/files
+          mountPath: /var/www/glpi/files    # CORRECTED PATH
+        - name: glpi-config-storage
+          mountPath: /var/www/glpi/config   # CORRECTED PATH
       volumes:
       - name: glpi-storage
         persistentVolumeClaim:
           claimName: glpi-files-pvc
+      - name: glpi-config-storage
+        persistentVolumeClaim:
+          claimName: glpi-config-pvc
 ---
 apiVersion: v1
 kind: Service
