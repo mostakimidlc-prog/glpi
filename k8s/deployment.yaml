@@ -1,0 +1,132 @@
+---
+# 1. MariaDB (Database) Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: glpi-db
+spec:
+  selector:
+    app: glpi-db
+  ports:
+    - port: 3306
+---
+# 2. MariaDB Deployment with F: Drive Storage
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-db
+spec:
+  selector:
+    matchLabels:
+      app: glpi-db
+  template:
+    metadata:
+      labels:
+        app: glpi-db
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.11
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "root_pass"
+        - name: MYSQL_DATABASE
+          value: "glpi"
+        - name: MYSQL_USER
+          value: "glpi"
+        - name: MYSQL_PASSWORD
+          value: "glpi_pass"
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: db-data
+        hostPath:
+          # This saves your database tables on your physical F drive
+          path: /mnt/f/glpi_k8s_data/mysql
+          type: DirectoryOrCreate
+
+---
+# 3. Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: glpi-redis
+spec:
+  selector:
+    app: glpi-redis
+  ports:
+    - port: 6379
+---
+# 4. Redis Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-redis
+spec:
+  selector:
+    matchLabels:
+      app: glpi-redis
+  template:
+    metadata:
+      labels:
+        app: glpi-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+
+---
+# 5. GLPI App Service (NodePort 30090)
+apiVersion: v1
+kind: Service
+metadata:
+  name: glpi-app-service
+spec:
+  type: NodePort
+  selector:
+    app: glpi-app
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30090
+---
+# 6. GLPI App Deployment with F: Drive Config Storage
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: glpi-app
+  template:
+    metadata:
+      labels:
+        app: glpi-app
+    spec:
+      containers:
+      - name: glpi
+        # This image must be imported into k3s via: 
+        # sudo k3s ctr images import /mnt/f/docker_backups/glpi_latest.tar
+        image: localhost:5000/glpi:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: glpi-config
+          mountPath: /var/www/html/config
+        - name: glpi-files
+          mountPath: /var/www/html/files
+      volumes:
+      - name: glpi-config
+        hostPath:
+          # This saves your DB connection info so you don't re-configure
+          path: /mnt/f/glpi_k8s_data/config
+          type: DirectoryOrCreate
+      - name: glpi-files
+        hostPath:
+          # This saves uploaded documents and logs
+          path: /mnt/f/glpi_k8s_data/files
+          type: DirectoryOrCreate

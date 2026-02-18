@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  glpi-prod-db:
+    image: mariadb:10.11
+    container_name: glpi-prod-db
+    hostname: glpi-prod-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: root_pass_prod_2024
+      MARIADB_DATABASE: glpidb_prod
+      MARIADB_USER: glpi_user_prod
+      MARIADB_PASSWORD: glpi_pass_prod_2024
+    volumes:
+      - glpi-prod-db-data:/var/lib/mysql
+    networks:
+      - glpi-prod-network
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  glpi-prod-redis:
+    image: redis:7-alpine
+    container_name: glpi-prod-redis
+    hostname: glpi-prod-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass redis_prod_pass_2024
+    volumes:
+      - glpi-prod-redis-data:/data
+    networks:
+      - glpi-prod-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--pass", "redis_prod_pass_2024", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  glpi-prod-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mostakimidlc/glpi:${IMAGE_TAG:-latest}
+    container_name: glpi-prod-app
+    hostname: glpi-prod-app
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    environment:
+      - DB_HOST=glpi-prod-db
+      - DB_NAME=glpidb_prod
+      - DB_USER=glpi_user_prod
+      - DB_PASSWORD=glpi_pass_prod_2024
+      - REDIS_HOST=glpi-prod-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_prod_pass_2024
+    volumes:
+      - glpi-prod-config:/var/www/glpi/config
+      - glpi-prod-files:/var/www/glpi/files
+      - glpi-prod-marketplace:/var/www/glpi/marketplace
+      # BIND MOUNT for plugins: This ensures the 10 plugins you cloned 
+      # on your host are the ones used, not old volume data.
+      - ./plugins:/var/www/glpi/plugins 
+    depends_on:
+      glpi-prod-db:
+        condition: service_healthy
+      glpi-prod-redis:
+        condition: service_healthy
+    networks:
+      - glpi-prod-network
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    healthcheck:
+      # Updated healthcheck to follow the /public/ redirect
+      test: ["CMD", "curl", "-f", "http://localhost/index.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  glpi-prod-network:
+    name: glpi-prod-network
+    driver: bridge
+
+volumes:
+  glpi-prod-db-data:
+    name: glpi-prod-db-data
+  glpi-prod-redis-data:
+    name: glpi-prod-redis-data
+  glpi-prod-config:
+    name: glpi-prod-config
+  glpi-prod-files:
+    name: glpi-prod-files
+  glpi-prod-marketplace:
+    name: glpi-prod-marketplace
