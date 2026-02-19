@@ -1,8 +1,20 @@
-# GLPI Dockerfile - Stable 11.0.5 Release
+# GLPI Dockerfile - Stable 11.0.5 Release (Proxy-Aware)
 FROM php:8.2-apache
 
+# --- PROXY CONFIGURATION START ---
+# Declare build arguments passed from Jenkins or CLI
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
+# Set environment variables for the build process
+# Tools like apt, curl, npm, and composer will detect these automatically
+ENV http_proxy=$http_proxy
+ENV https_proxy=$https_proxy
+ENV no_proxy=$no_proxy
+# --- PROXY CONFIGURATION END ---
+
 # 1. Install system dependencies
-# These are the baseline requirements for GLPI and its common plugins
 RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg-dev \
@@ -20,10 +32,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
     gettext \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Install Node.js 20.x (LTS)
-# Useful for compiling assets if you modify plugin source code
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g npm@latest \
@@ -33,7 +45,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # 4. Configure and install mandatory PHP extensions
-# These match the official GLPI 11 requirements
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
     bcmath \
@@ -49,7 +60,11 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     zip
 
 # 5. Install Redis and APCu extensions for caching
-RUN pecl install apcu redis \
+# PECL requires manual proxy configuration via pear
+RUN if [ ! -z "$http_proxy" ]; then \
+        pear config-set http_proxy $http_proxy; \
+    fi \
+    && pecl install apcu redis \
     && docker-php-ext-enable apcu redis
 
 # 6. Configure PHP for GLPI Stable Performance
@@ -74,33 +89,33 @@ RUN { \
     echo 'opcache.revalidate_freq=2'; \
     } > /usr/local/etc/php/conf.d/opcache.ini
 
-# 8. Enable Apache modules for URL rewriting and Security
+# 8. Enable Apache modules
 RUN a2enmod rewrite headers ssl
 
-# 9. Set working directory to GLPI root
+# 9. Set working directory
 WORKDIR /var/www/glpi
 
-# 10. Copy GLPI source code (Ensure you are on the 'stable' branch locally)
+# 10. Copy GLPI source code
 COPY . /var/www/glpi/
 
-# 11. Install Composer dependencies (Production mode)
+# 11. Install Composer dependencies
+# Note: Composer uses the ENV http_proxy variables set above automatically.
 RUN if [ -f "composer.json" ]; then \
         composer install --no-dev --optimize-autoloader --no-interaction; \
     fi
 
-# 12. Configure Apache DocumentRoot to point to /public (GLPI 11+ standard)
+# 12. Configure Apache DocumentRoot to point to /public
 RUN sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/sites-available/000-default.conf \
     && sed -i 's|/var/www/html|/var/www/glpi/public|g' /etc/apache2/apache2.conf
 
-# 13. Update Apache Directory permissions for the public folder
+# 13. Update Apache Directory permissions
 RUN echo '<Directory /var/www/glpi/public>' >> /etc/apache2/apache2.conf \
     && echo '    Options -Indexes +FollowSymLinks' >> /etc/apache2/apache2.conf \
     && echo '    AllowOverride All' >> /etc/apache2/apache2.conf \
     && echo '    Require all granted' >> /etc/apache2/apache2.conf \
     && echo '</Directory>' >> /etc/apache2/apache2.conf
 
-# 14. Create required directories and enforce strict ownership
-# This ensures your cloned plugins are accessible to the web server
+# 14. Create required directories and enforce ownership
 RUN mkdir -p /var/www/glpi/config \
     /var/www/glpi/files \
     /var/www/glpi/marketplace \
@@ -108,11 +123,11 @@ RUN mkdir -p /var/www/glpi/config \
     && chown -R www-data:www-data /var/www/glpi \
     && chmod -R 755 /var/www/glpi
 
-# 15. Copy and prepare startup script
+# 15. Copy startup script
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# 16. Expose internal port 80 (Map to 8090 in your run command)
+# 16. Expose internal port 80
 EXPOSE 80
 
 # 17. Health check

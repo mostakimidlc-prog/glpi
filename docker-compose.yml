@@ -3,8 +3,7 @@ version: '3.8'
 services:
   glpi-prod-db:
     image: mariadb:10.11
-    container_name: glpi-prod-db
-    hostname: glpi-prod-db
+    container_name: glpi-mysql
     restart: unless-stopped
     environment:
       MARIADB_ROOT_PASSWORD: root_pass_prod_2024
@@ -50,6 +49,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - http_proxy=http://192.168.111.21:8080
+        - https_proxy=http://192.168.111.21:8080
     image: mostakimidlc/glpi:${IMAGE_TAG:-latest}
     container_name: glpi-prod-app
     hostname: glpi-prod-app
@@ -64,13 +66,13 @@ services:
       - REDIS_HOST=glpi-prod-redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=redis_prod_pass_2024
+      - http_proxy=http://192.168.111.21:8080
+      - https_proxy=http://192.168.111.21:8080
     volumes:
       - glpi-prod-config:/var/www/glpi/config
       - glpi-prod-files:/var/www/glpi/files
       - glpi-prod-marketplace:/var/www/glpi/marketplace
-      # BIND MOUNT for plugins: This ensures the 10 plugins you cloned 
-      # on your host are the ones used, not old volume data.
-      - ./plugins:/var/www/glpi/plugins 
+      - ./plugins:/var/www/glpi/plugins
     depends_on:
       glpi-prod-db:
         condition: service_healthy
@@ -82,7 +84,6 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     healthcheck:
-      # Updated healthcheck to follow the /public/ redirect
       test: ["CMD", "curl", "-f", "http://localhost/index.php"]
       interval: 30s
       timeout: 10s

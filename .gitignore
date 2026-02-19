@@ -56,3 +56,10 @@ phpstan.neon
 /tests/e2e/output/
 /tests/e2e/.env.local
 !/tests/e2e/.env
+mysql-data/
+backups/
+plugins/
+files/_cache/
+files/_sessions/
+files/_tmp/
+.git/index.lock
