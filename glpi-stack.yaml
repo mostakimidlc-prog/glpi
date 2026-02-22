@@ -1,6 +1,5 @@
-# 1. STORAGE DEFINITIONS
+# 1. STORAGE DEFINITIONS (Persistent Volumes & Claims)
 ---
-# Database Storage
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -11,7 +10,7 @@ spec:
     storage: 5Gi
   accessModes: ["ReadWriteOnce"]
   hostPath:
-    path: "/home/mostakim/projects/glpi/mysql-data"
+    path: "/home/mostakim/projects/pvc/glpi/mysql-data"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -25,7 +24,6 @@ spec:
     requests:
       storage: 5Gi
 ---
-# Files Storage
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -36,7 +34,7 @@ spec:
     storage: 2Gi
   accessModes: ["ReadWriteOnce"]
   hostPath:
-    path: "/home/mostakim/projects/glpi/files"
+    path: "/home/mostakim/projects/pvc/glpi/files"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -50,7 +48,6 @@ spec:
     requests:
       storage: 2Gi
 ---
-# Config Storage
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -61,7 +58,7 @@ spec:
     storage: 500Mi
   accessModes: ["ReadWriteOnce"]
   hostPath:
-    path: "/home/mostakim/projects/glpi/config"
+    path: "/home/mostakim/projects/pvc/glpi/config"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -75,7 +72,6 @@ spec:
     requests:
       storage: 500Mi
 ---
-# Plugins Storage
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -145,6 +141,7 @@ spec:
     app: glpi-db
   ports:
     - port: 3306
+
 ---
 # 3. Redis Cache
 ---
@@ -176,15 +173,21 @@ spec:
     app: glpi-redis
   ports:
     - port: 6379
+
 ---
-# 4. GLPI Web App
+# 4. GLPI Web App (Proxy Enabled)
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: glpi-deployment
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: glpi
@@ -198,16 +201,42 @@ spec:
         image: localhost:5000/glpi:latest
         imagePullPolicy: Always
         env:
+        # Proxy Settings
         - name: http_proxy
           value: "http://192.168.111.21:8080"
         - name: https_proxy
           value: "http://192.168.111.21:8080"
+        # CRITICAL: Exclude internal services from proxy
         - name: no_proxy
           value: "localhost,127.0.0.1,glpi-db-service,glpi-redis-service,10.42.0.0/16,svc.cluster.local"
         - name: REDIS_HOST
           value: "glpi-redis-service"
         ports:
         - containerPort: 80
+
+        # --- THE 15-MINUTE WAIT FIX ---
+        startupProbe:
+          httpGet:
+            path: /index.php
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 90 
+
+        readinessProbe:
+          httpGet:
+            path: /index.php
+            port: 80
+          periodSeconds: 15
+          failureThreshold: 5 
+
+        livenessProbe:
+          httpGet:
+            path: /index.php
+            port: 80
+          periodSeconds: 30
+          failureThreshold: 3
+
         volumeMounts:
         - name: glpi-storage
           mountPath: /var/www/glpi/files

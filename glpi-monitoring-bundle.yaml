@@ -1,0 +1,116 @@
+# 1. MariaDB Deployment with Monitoring Sidecar
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-db
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: glpi-db
+  template:
+    metadata:
+      labels:
+        app: glpi-db
+    spec:
+      containers:
+      - name: mariadb
+        image: mariadb:10.11
+        env:
+        - name: MARIADB_ROOT_PASSWORD
+          value: "glpi_root_pass"
+        - name: MARIADB_DATABASE
+          value: "glpidb"
+        - name: MARIADB_USER
+          value: "glpi_user"
+        - name: MARIADB_PASSWORD
+          value: "glpi_pass"
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: glpi-db-data
+          mountPath: /var/lib/mysql
+      - name: mariadb-exporter
+        image: prom/mysqld-exporter:v0.15.0
+        # Using args ensures the exporter doesn't look for a .my.cnf file
+        args:
+        - "--mysqld.address=localhost:3306"
+        - "--mysqld.username=glpi_user:glpi_pass"
+        env:
+        - name: DATA_SOURCE_NAME
+          value: "glpi_user:glpi_pass@(localhost:3306)/"
+        ports:
+        - containerPort: 9104
+          name: db-metrics
+      volumes:
+      - name: glpi-db-data
+        persistentVolumeClaim:
+          claimName: glpi-db-pvc
+---
+# 2. Redis Deployment with Monitoring Sidecar
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glpi-redis
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: glpi-redis
+  template:
+    metadata:
+      labels:
+        app: glpi-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+      - name: redis-exporter
+        image: oliver006/redis_exporter:v1.58.0
+        ports:
+        - containerPort: 9121
+          name: redis-metrics
+---
+# 3. ServiceMonitor for MariaDB
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: glpi-db-monitor
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: glpi-db
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+  - port: db-metrics
+    interval: 30s
+---
+# 4. ServiceMonitor for Redis
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: glpi-redis-monitor
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: glpi-redis
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+  - port: redis-metrics
+    interval: 30s
